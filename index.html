@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UV Monitor Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; background: #0b1120; color: white; }
+        .glass { background: #161e2d; border-radius: 1.5rem; border: 1px solid #2d3748; }
+        .btn-active { background-color: #3b82f6; color: white; }
+        th, td { border-bottom: 1px solid #2d3748; padding: 10px; }
+    </style>
+</head>
+<body class="p-4 md:p-6">
+    <div class="max-w-7xl mx-auto space-y-4">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div id="advice-card" class="glass p-5 border-l-4 border-green-500 shadow-lg flex flex-col justify-center">
+                <p class="text-slate-400 text-xs mb-1">💡 คำแนะนำตอนนี้</p>
+                <p id="uv-advice" class="text-lg font-bold">กิจกรรมปกติ</p>
+            </div>
+            <div class="lg:col-span-2 glass p-5 relative">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest">เกณฑ์มาตรฐาน UV INDEX (WHO)</h3>
+                    <button onclick="toggleModal()" class="bg-slate-700 hover:bg-slate-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">i</button>
+                </div>
+                <div class="grid grid-cols-5 gap-2 text-center text-[10px] md:text-xs">
+                    <div class="bg-green-500/10 border border-green-500/30 p-2 rounded-lg text-green-400">0-2<br>ต่ำ</div>
+                    <div class="bg-yellow-500/10 border border-yellow-500/30 p-2 rounded-lg text-yellow-400">3-5<br>กลาง</div>
+                    <div class="bg-orange-500/10 border border-orange-500/30 p-2 rounded-lg text-orange-400">6-7<br>สูง</div>
+                    <div class="bg-red-500/10 border border-red-500/30 p-2 rounded-lg text-red-400">8-10<br>สูงมาก</div>
+                    <div class="bg-purple-500/10 border border-purple-500/30 p-2 rounded-lg text-purple-400">11+<br>อันตราย</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="glass p-8 flex flex-col items-center justify-center text-center shadow-xl min-h-[350px]">
+                <p class="text-slate-400 uppercase text-[10px] tracking-widest mb-4">REAL-TIME UV INDEX</p>
+                <h1 id="uv-val" class="text-[100px] font-black leading-none transition-all">0.0</h1>
+                <div id="uv-status-pill" class="mt-4 px-8 py-2 rounded-full font-bold text-xl">--</div>
+                <p class="text-[10px] text-slate-500 mt-6 tracking-widest">● อัปเดต: <span id="last-time">--:--:--</span></p>
+            </div>
+
+            <div class="lg:col-span-2 glass p-6 shadow-xl relative flex flex-col">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 id="graph-title" class="text-xs font-semibold text-slate-400 uppercase tracking-widest">แนวโน้มย้อนหลัง (LIVE)</h3>
+                    <div class="flex bg-slate-800 rounded-lg p-1">
+                        <button onclick="switchGraph('live')" id="btn-live" class="px-3 py-1 text-[10px] rounded-md btn-active">LIVE</button>
+                        <button onclick="switchGraph('hourly')" id="btn-hourly" class="px-3 py-1 text-[10px] rounded-md text-slate-400 ml-1">HOURLY</button>
+                    </div>
+                </div>
+                <div class="flex-grow h-[300px]">
+                    <canvas id="mainChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="glass bg-[#1a2333] w-full max-w-3xl overflow-hidden shadow-2xl">
+            <div class="p-6 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="text-xl font-bold">เกณฑ์มาตรฐาน UV Index (WHO)</h2>
+                <button onclick="toggleModal()" class="text-3xl">&times;</button>
+            </div>
+            <div class="p-6 overflow-x-auto text-sm">
+                <table class="w-full text-left">
+                    <thead class="text-slate-400"><tr><th>ค่า UV</th><th>ความรุนแรง</th><th>สี</th><th>คำแนะนำ</th></tr></thead>
+                    <tbody>
+                        <tr><td>0-2</td><td class="text-green-400">ต่ำ</td><td>เขียว</td><td>สวมแว่นกันแดดหากแดดแรง</td></tr>
+                        <tr><td>3-5</td><td class="text-yellow-400">ปานกลาง</td><td>เหลือง</td><td>ใช้ครีม SPF 15+, หาที่ร่ม</td></tr>
+                        <tr><td>6-7</td><td class="text-orange-400">สูง</td><td>ส้ม</td><td>ใช้ครีม SPF 30+, กางร่ม</td></tr>
+                        <tr><td>8-10</td><td class="text-red-400">สูงมาก</td><td>แดง</td><td>เลี่ยงแดดจัด, เสื้อผ้าปกปิด</td></tr>
+                        <tr><td>11+</td><td class="text-purple-400">อันตราย</td><td>ม่วง</td><td>ควรอยู่ในที่ร่มตลอดเวลา</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = { databaseURL: "https://myuvmonitor-default-rtdb.asia-southeast1.firebasedatabase.app/" };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        let currentMode = 'live'; let mainChart;
+
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        mainChart = new Chart(ctx, {
+            type: 'line', data: { labels: [], datasets: [{ data: [], borderWidth: 3, tension: 0.4 }] },
+            options: { maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+
+        function switchGraph(mode) {
+            currentMode = mode;
+            document.getElementById('btn-live').className = mode === 'live' ? "px-3 py-1 text-[10px] rounded-md btn-active" : "px-3 py-1 text-[10px] rounded-md text-slate-400";
+            document.getElementById('btn-hourly').className = mode === 'hourly' ? "px-3 py-1 text-[10px] rounded-md btn-active ml-1" : "px-3 py-1 text-[10px] rounded-md text-slate-400 ml-1";
+            document.getElementById('graph-title').innerText = mode === 'live' ? "แนวโน้มย้อนหลัง (LIVE)" : "ค่าเฉลี่ยรายชั่วโมง (DATA LOGS)";
+            fetchData();
+        }
+
+        function fetchData() {
+            const ref = currentMode === 'live' ? database.ref('/UV_Sensor/history').limitToLast(15) : database.ref('/UV_Sensor/hourly_averages');
+            ref.once('value', s => {
+                let labels = [], data = [];
+                s.forEach(c => {
+                    if(currentMode === 'live') { labels.push(""); data.push(c.val().uv); }
+                    else { labels.push(c.val().hour + ":00"); data.push(c.val().avg); }
+                });
+                mainChart.config.type = currentMode === 'live' ? 'line' : 'bar';
+                mainChart.data.labels = labels;
+                mainChart.data.datasets[0] = { data: data, borderColor: currentMode === 'live' ? '#4ade80' : '#38bdf8', backgroundColor: currentMode === 'live' ? 'rgba(74, 222, 128, 0.1)' : 'rgba(56, 189, 248, 0.5)', fill: currentMode === 'live' };
+                mainChart.update();
+            });
+        }
+
+        database.ref('/UV_Sensor/current').on('value', s => {
+            const uv = parseFloat(s.val() || 0).toFixed(1);
+            document.getElementById('uv-val').innerText = uv;
+            document.getElementById('last-time').innerText = new Date().toLocaleTimeString('th-TH');
+            updateUI(uv);
+        });
+
+        database.ref('/UV_Sensor/history').limitToLast(15).on('value', () => { if(currentMode === 'live') fetchData(); });
+
+        function updateUI(uv) {
+            let s = { status: "ปลอดภัย", advice: "กิจกรรมปกติ", color: "#4ade80", b: "border-green-500" };
+            if(uv >= 11) s = { status: "อันตราย", advice: "ระวังอย่างยิ่ง, อยู่แต่ในที่ร่ม", color: "#a855f7", b: "border-purple-500" };
+            else if(uv >= 8) s = { status: "สูงมาก", advice: "เสื้อผ้าปกปิด, เลี่ยงแดดจัด", color: "#f87171", b: "border-red-500" };
+            else if(uv >= 6) s = { status: "สูง", advice: "ใช้ครีม SPF 30+, สวมหมวก/กางร่ม", color: "#fb923c", b: "border-orange-500" };
+            else if(uv >= 3) s = { status: "ปานกลาง", advice: "ใช้ครีม SPF 15+, หาที่ร่ม", color: "#facc15", b: "border-yellow-500" };
+            document.getElementById('uv-val').style.color = s.color;
+            document.getElementById('uv-status-pill').innerText = s.status;
+            document.getElementById('uv-status-pill').style.backgroundColor = s.color + '33';
+            document.getElementById('uv-status-pill').style.color = s.color;
+            document.getElementById('uv-advice').innerText = s.advice;
+            document.getElementById('advice-card').className = `glass p-5 border-l-4 ${s.b} flex flex-col justify-center shadow-lg`;
+        }
+
+        function toggleModal() { document.getElementById('modal').classList.toggle('hidden'); }
+        fetchData();
+    </script>
+</body>
+</html>
